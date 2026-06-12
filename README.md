@@ -2,7 +2,7 @@
 
 A small HTTP service that receives impression events and returns a real-time bid decision.
 
-The service simulates a simplified AdTech bidding flow: it validates an incoming impression request, retrieves user features from an in-memory feature store, enriches the request context with a local rule-based classifier, assigns the user to an A/B test group, calculates a score, and returns either `BID` or `NO_BID`.
+The service simulates a simplified AdTech bidding flow: it validates an incoming impression request, retrieves user features from an in-memory feature store, classifies the request context locally or with optional OpenAI enrichment, assigns the user to an A/B test group, calculates a score, and returns either `BID` or `NO_BID`.
 
 ## Tech Stack
 
@@ -35,7 +35,7 @@ app/
   bid_decision_log.py  # PostgreSQL bid decision logging
   database.py          # SQLAlchemy engine and session setup
   scoring.py           # Scoring, A/B testing, bid decision logic
-  ai_classifier.py     # Local context classification fallback
+  ai_classifier.py     # Optional OpenAI classification with local fallback
 
 tests/
   test_api.py
@@ -169,3 +169,26 @@ docker compose exec app python scripts/init_db.py
 
 Decision logging is best-effort. A PostgreSQL connection or write failure does
 not change the `/bid` response and does not prevent memory mode from working.
+
+## Optional OpenAI Context Enrichment
+
+Local rule-based context classification is used by default. To enable OpenAI
+classification, set the following environment variables without committing the
+API key:
+
+```bash
+ENABLE_AI_ENRICHMENT=true
+OPENAI_API_KEY=your-api-key
+OPENAI_MODEL=gpt-4o-mini
+AI_TIMEOUT_SECONDS=1.0
+```
+
+Supported categories are `sports`, `finance`, `fashion`, `gaming`, `travel`,
+`generic`, and `unknown`. The local classifier is used when enrichment is
+disabled, the API key is missing, the context is empty, OpenAI times out or
+fails, or the model returns an unsupported category. OpenAI failures are not
+included in `/bid` responses, and the response contract is unchanged.
+
+A production low-latency bidder would normally avoid a synchronous external LLM
+call for every request. Common approaches include caching classifications,
+preclassifying known content, or running a lightweight local model.

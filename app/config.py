@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     group_b_threshold_delta: float = 0.03
     group_b_bid_multiplier: float = 1.08
     max_ctr: float = 0.12
-    enable_ai_enrichment: bool = True
+    enable_ai_enrichment: bool = False
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    ai_timeout_seconds: float = 1.0
     feature_store_type: str = "memory"
     redis_url: str = "redis://localhost:6379/0"
     campaign_store_type: str = "memory"
