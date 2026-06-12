@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     group_b_bid_multiplier: float = 1.08
     max_ctr: float = 0.12
     enable_ai_enrichment: bool = True
+    feature_store_type: str = "memory"
+    redis_url: str = "redis://localhost:6379/0"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

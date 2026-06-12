@@ -1,4 +1,11 @@
+import json
+from functools import lru_cache
 from typing import Any
+
+from redis import Redis
+from redis.exceptions import RedisError
+
+from app.config import get_settings
 
 
 DEFAULT_USER_FEATURES: dict[str, Any] = {
@@ -37,18 +44,63 @@ USER_FEATURES: dict[str, dict[str, Any]] = {
 }
 
 
+class MemoryFeatureStore:
+    def __init__(self, features: dict[str, dict[str, Any]] | None = None) -> None:
+        self.features = USER_FEATURES if features is None else features
+
+    def get_user_features(self, user_id: str) -> dict[str, Any]:
+        features = self.features.get(user_id)
+        if features is None:
+            return _default_features()
+
+        return {**features, "is_default": False}
+
+
+class RedisFeatureStore:
+    def __init__(self, redis_url: str, client: Any | None = None) -> None:
+        self.redis_url = redis_url
+        self.client = client
+
+    def get_user_features(self, user_id: str) -> dict[str, Any]:
+        try:
+            raw = self._get_client().get(_feature_key(user_id))
+            if raw is None:
+                return _default_features()
+
+            features = json.loads(raw)
+            if not isinstance(features, dict):
+                return _default_features()
+
+            return {**features, "is_default": False}
+        except (RedisError, TimeoutError, ValueError, TypeError):
+            return _default_features()
+
+    def _get_client(self):
+        if self.client is None:
+            self.client = Redis.from_url(self.redis_url, decode_responses=True)
+        return self.client
+
+
+@lru_cache
+def _get_feature_store(
+    feature_store_type: str,
+    redis_url: str,
+) -> MemoryFeatureStore | RedisFeatureStore:
+    if feature_store_type.lower() == "redis":
+        return RedisFeatureStore(redis_url)
+
+    return MemoryFeatureStore()
+
+
 def get_user_features(user_id: str) -> dict[str, Any]:
-    """
-    Simulates a real-time feature store lookup.
+    settings = get_settings()
+    store = _get_feature_store(settings.feature_store_type, settings.redis_url)
+    return store.get_user_features(user_id)
 
-    If the user is unknown, default features are returned so the service
-    can still make a safe decision instead of failing.
-    """
-    if user_id in USER_FEATURES:
-        features = USER_FEATURES[user_id].copy()
-        features["is_default"] = False
-        return features
 
-    features = DEFAULT_USER_FEATURES.copy()
-    features["is_default"] = True
-    return features
+def _default_features() -> dict[str, Any]:
+    return {**DEFAULT_USER_FEATURES, "is_default": True}
+
+
+def _feature_key(user_id: str) -> str:
+    return f"user_features:{user_id}"
