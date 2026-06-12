@@ -7,6 +7,18 @@ from app.main import app
 client = TestClient(app)
 
 
+def make_bid_payload(impression_id="imp_123", floor_price=1.2):
+    return {
+        "impression_id": impression_id,
+        "user_id": "user_sports_1",
+        "placement": "mobile_feed",
+        "country": "IL",
+        "device": "mobile",
+        "floor_price": floor_price,
+        "context": "sports shoes sale",
+    }
+
+
 def test_health_endpoint_returns_ok():
     response = client.get("/health")
 
@@ -15,15 +27,7 @@ def test_health_endpoint_returns_ok():
 
 
 def test_bid_endpoint_returns_valid_bid_response():
-    payload = {
-        "impression_id": "imp_123",
-        "user_id": "user_sports_1",
-        "placement": "mobile_feed",
-        "country": "IL",
-        "device": "mobile",
-        "floor_price": 1.2,
-        "context": "sports shoes sale",
-    }
+    payload = make_bid_payload()
 
     response = client.post("/bid", json=payload)
 
@@ -35,6 +39,76 @@ def test_bid_endpoint_returns_valid_bid_response():
     assert data["experiment_group"] in {"A", "B"}
     assert 0 <= data["score"] <= 1
     assert "reason" in data
+
+
+def test_successful_bid_updates_campaign_spend(monkeypatch):
+    from app.campaign_store import MemoryCampaignStore, SAMPLE_CAMPAIGNS
+
+    campaign = SAMPLE_CAMPAIGNS[0].copy()
+    campaign["spent_today"] = 10.0
+    campaign["max_bid"] = 1.5
+    store = MemoryCampaignStore([campaign])
+    monkeypatch.setattr(main_module, "get_campaign_store", lambda: store)
+    monkeypatch.setattr(main_module, "log_bid_decision", lambda **kwargs: True)
+
+    response = client.post("/bid", json=make_bid_payload("imp_spend_success"))
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "BID"
+    assert response.json()["bid_price"] == 1.5
+    assert campaign["spent_today"] == 11.5
+
+
+def test_no_bid_does_not_update_campaign_spend(monkeypatch):
+    class TrackingCampaignStore:
+        def __init__(self):
+            self.record_spend_calls = []
+
+        def get_eligible_campaign(self, request, category, bid_price=None):
+            return None
+
+        def record_spend(self, campaign_id, amount):
+            self.record_spend_calls.append((campaign_id, amount))
+            return True
+
+    store = TrackingCampaignStore()
+    monkeypatch.setattr(main_module, "get_campaign_store", lambda: store)
+    monkeypatch.setattr(main_module, "log_bid_decision", lambda **kwargs: True)
+
+    response = client.post(
+        "/bid",
+        json=make_bid_payload("imp_no_spend", floor_price=100.0),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "NO_BID"
+    assert store.record_spend_calls == []
+
+
+def test_bid_endpoint_survives_spend_database_failure(monkeypatch):
+    class FailingCampaignStore:
+        def get_eligible_campaign(self, request, category, bid_price=None):
+            return {
+                "campaign_id": "campaign_sports_il_mobile",
+                "max_bid": 1.5,
+                "creative_id": "creative_sports_001",
+            }
+
+        def record_spend(self, campaign_id, amount):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        main_module,
+        "get_campaign_store",
+        lambda: FailingCampaignStore(),
+    )
+    monkeypatch.setattr(main_module, "log_bid_decision", lambda **kwargs: True)
+
+    response = client.post("/bid", json=make_bid_payload("imp_spend_failure"))
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "BID"
+    assert response.json()["bid_price"] == 1.5
 
 
 def test_bid_endpoint_logs_decision_with_campaign_metadata(monkeypatch):

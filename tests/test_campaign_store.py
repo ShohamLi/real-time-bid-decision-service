@@ -56,6 +56,16 @@ def test_exhausted_campaign_is_ignored():
     assert store.get_eligible_campaign(make_request(), "sports", 2.0) is None
 
 
+def test_memory_store_prevents_spending_above_daily_budget():
+    campaign = SAMPLE_CAMPAIGNS[0].copy()
+    campaign["daily_budget"] = 10.0
+    campaign["spent_today"] = 9.0
+    store = MemoryCampaignStore([campaign])
+
+    assert store.record_spend(campaign["campaign_id"], 2.0) is False
+    assert campaign["spent_today"] == 9.0
+
+
 @pytest.mark.parametrize(
     ("country", "device", "placement"),
     [

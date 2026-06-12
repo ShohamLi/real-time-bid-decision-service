@@ -151,6 +151,8 @@ country, device, placement, and category with remaining daily budget. The
 campaign creative is returned and the bid is capped at `max_bid`. If no
 eligible campaign exists, or PostgreSQL cannot be queried in Postgres mode,
 the service returns `NO_BID` with reason `No eligible campaign found`.
+Successful `BID` decisions consume the final capped bid price from the
+campaign's daily budget. `NO_BID` decisions do not update campaign spend.
 
 ## Bid Decision Logging
 

@@ -1,7 +1,8 @@
 from functools import lru_cache
+from threading import Lock
 from typing import Any, Protocol
 
-from sqlalchemy import Float, String, case, or_, select
+from sqlalchemy import Float, String, case, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -99,10 +100,17 @@ class CampaignStore(Protocol):
         bid_price: float | None = None,
     ) -> dict[str, Any] | None: ...
 
+    def record_spend(self, campaign_id: str, amount: float) -> bool: ...
+
 
 class MemoryCampaignStore:
     def __init__(self, campaigns: list[dict[str, Any]] | None = None) -> None:
-        self.campaigns = SAMPLE_CAMPAIGNS if campaigns is None else campaigns
+        self.campaigns = (
+            [campaign.copy() for campaign in SAMPLE_CAMPAIGNS]
+            if campaigns is None
+            else campaigns
+        )
+        self._lock = Lock()
 
     def get_eligible_campaign(
         self,
@@ -115,6 +123,26 @@ class MemoryCampaignStore:
                 return campaign.copy()
 
         return None
+
+    def record_spend(self, campaign_id: str, amount: float) -> bool:
+        if amount <= 0:
+            return False
+
+        with self._lock:
+            for campaign in self.campaigns:
+                if campaign["campaign_id"] != campaign_id:
+                    continue
+                if campaign["status"] != "active":
+                    return False
+
+                spent_today = float(campaign["spent_today"])
+                if spent_today + amount > float(campaign["daily_budget"]):
+                    return False
+
+                campaign["spent_today"] = spent_today + amount
+                return True
+
+        return False
 
 
 class PostgresCampaignStore:
@@ -149,6 +177,35 @@ class PostgresCampaignStore:
                 return campaign.to_dict() if campaign else None
         except SQLAlchemyError:
             return None
+
+    def record_spend(self, campaign_id: str, amount: float) -> bool:
+        if amount <= 0:
+            return False
+
+        try:
+            with self.session_factory() as session:
+                try:
+                    statement = (
+                        update(Campaign)
+                        .where(
+                            Campaign.campaign_id == campaign_id,
+                            Campaign.status == "active",
+                            Campaign.spent_today + amount <= Campaign.daily_budget,
+                        )
+                        .values(spent_today=Campaign.spent_today + amount)
+                    )
+                    result = session.execute(statement)
+                    if result.rowcount != 1:
+                        session.rollback()
+                        return False
+
+                    session.commit()
+                    return True
+                except SQLAlchemyError:
+                    session.rollback()
+                    return False
+        except SQLAlchemyError:
+            return False
 
 
 @lru_cache
