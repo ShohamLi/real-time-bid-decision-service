@@ -3,11 +3,12 @@ import time
 
 from fastapi import FastAPI
 
+from app.bid_decision_log import log_bid_decision
 from app.campaign_store import get_campaign_store
 from app.config import get_settings
 from app.feature_store import get_user_features
 from app.models import BidRequest, BidResponse
-from app.scoring import make_bid_decision
+from app.scoring import make_bid_decision_result
 
 
 app = FastAPI(
@@ -70,14 +71,25 @@ def create_bid_decision(request: BidRequest) -> BidResponse:
 
     settings = get_settings()
     features = get_user_features(request.user_id)
-    response = make_bid_decision(
+    result = make_bid_decision_result(
         request=request,
         features=features,
         settings=settings,
         campaign_store=get_campaign_store(),
     )
+    response = result.response
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     metrics.record(decision=response.decision, latency_ms=latency_ms)
+
+    try:
+        log_bid_decision(
+            request=request,
+            response=response,
+            category=result.category,
+            campaign_id=result.campaign_id,
+        )
+    except Exception:
+        pass
 
     return response
