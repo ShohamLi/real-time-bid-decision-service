@@ -124,11 +124,7 @@ def make_bid_decision_result(
 ) -> BidDecisionResult:
     group = assign_experiment_group(request.user_id)
 
-    category = (
-        classify_context(request.context)
-        if settings.enable_ai_enrichment
-        else "unknown"
-    )
+    category = classify_context(request.context, settings=settings)
 
     score = calculate_score(features=features, category=category, settings=settings)
     threshold = get_threshold_for_group(group=group, settings=settings)
