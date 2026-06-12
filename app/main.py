@@ -71,13 +71,24 @@ def create_bid_decision(request: BidRequest) -> BidResponse:
 
     settings = get_settings()
     features = get_user_features(request.user_id)
+    campaign_store = get_campaign_store()
     result = make_bid_decision_result(
         request=request,
         features=features,
         settings=settings,
-        campaign_store=get_campaign_store(),
+        campaign_store=campaign_store,
     )
     response = result.response
+
+    if (
+        response.decision == "BID"
+        and result.campaign_id is not None
+        and response.bid_price is not None
+    ):
+        try:
+            campaign_store.record_spend(result.campaign_id, response.bid_price)
+        except Exception:
+            pass
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     metrics.record(decision=response.decision, latency_ms=latency_ms)
