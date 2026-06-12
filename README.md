@@ -32,6 +32,7 @@ app/
   config.py            # Configurable business parameters
   feature_store.py     # Memory and Redis feature-store backends
   campaign_store.py    # Memory and PostgreSQL campaign stores
+  bid_decision_log.py  # PostgreSQL bid decision logging
   database.py          # SQLAlchemy engine and session setup
   scoring.py           # Scoring, A/B testing, bid decision logic
   ai_classifier.py     # Local context classification fallback
@@ -150,3 +151,19 @@ country, device, placement, and category with remaining daily budget. The
 campaign creative is returned and the bid is capped at `max_bid`. If no
 eligible campaign exists, or PostgreSQL cannot be queried in Postgres mode,
 the service returns `NO_BID` with reason `No eligible campaign found`.
+
+## Bid Decision Logging
+
+Every valid `/bid` request is logged to the PostgreSQL `bid_decisions` table
+after its decision is created. The row includes the request fields, inferred
+category, experiment group, score, decision, bid and creative details, matched
+campaign ID when available, reason, and creation time.
+
+Create the table together with the campaigns table:
+
+```bash
+docker compose exec app python scripts/init_db.py
+```
+
+Decision logging is best-effort. A PostgreSQL connection or write failure does
+not change the `/bid` response and does not prevent memory mode from working.
