@@ -1,4 +1,5 @@
 import hashlib
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from app.ai_classifier import classify_context
@@ -19,6 +20,13 @@ CREATIVES_BY_CATEGORY: dict[str, str] = {
     "travel": "creative_travel_001",
     "unknown": "creative_generic_001",
 }
+
+
+@dataclass(frozen=True)
+class BidDecisionResult:
+    response: BidResponse
+    category: str
+    campaign_id: str | None
 
 
 def clamp(value: float, min_value: float = 0.0, max_value: float = 1.0) -> float:
@@ -100,6 +108,20 @@ def make_bid_decision(
     settings: Settings,
     campaign_store: "CampaignStore | None" = None,
 ) -> BidResponse:
+    return make_bid_decision_result(
+        request=request,
+        features=features,
+        settings=settings,
+        campaign_store=campaign_store,
+    ).response
+
+
+def make_bid_decision_result(
+    request: BidRequest,
+    features: dict[str, Any],
+    settings: Settings,
+    campaign_store: "CampaignStore | None" = None,
+) -> BidDecisionResult:
     group = assign_experiment_group(request.user_id)
 
     category = (
@@ -127,14 +149,18 @@ def make_bid_decision(
             bid_price=calculated_bid_price,
         )
         if campaign is None:
-            return BidResponse(
-                impression_id=request.impression_id,
-                decision="NO_BID",
-                bid_price=None,
-                creative_id=None,
-                experiment_group=group,
-                score=score,
-                reason="No eligible campaign found",
+            return BidDecisionResult(
+                response=BidResponse(
+                    impression_id=request.impression_id,
+                    decision="NO_BID",
+                    bid_price=None,
+                    creative_id=None,
+                    experiment_group=group,
+                    score=score,
+                    reason="No eligible campaign found",
+                ),
+                category=category,
+                campaign_id=None,
             )
 
         final_bid_price = min(calculated_bid_price, float(campaign["max_bid"]))
@@ -142,14 +168,18 @@ def make_bid_decision(
         if features.get("is_default"):
             reason += "; default user features were used"
 
-        return BidResponse(
-            impression_id=request.impression_id,
-            decision="BID",
-            bid_price=final_bid_price,
-            creative_id=str(campaign["creative_id"]),
-            experiment_group=group,
-            score=score,
-            reason=reason,
+        return BidDecisionResult(
+            response=BidResponse(
+                impression_id=request.impression_id,
+                decision="BID",
+                bid_price=final_bid_price,
+                creative_id=str(campaign["creative_id"]),
+                experiment_group=group,
+                score=score,
+                reason=reason,
+            ),
+            category=category,
+            campaign_id=str(campaign["campaign_id"]),
         )
 
     if score < threshold:
@@ -160,12 +190,16 @@ def make_bid_decision(
     if features.get("is_default"):
         reason += "; default user features were used"
 
-    return BidResponse(
-        impression_id=request.impression_id,
-        decision="NO_BID",
-        bid_price=None,
-        creative_id=None,
-        experiment_group=group,
-        score=score,
-        reason=reason,
+    return BidDecisionResult(
+        response=BidResponse(
+            impression_id=request.impression_id,
+            decision="NO_BID",
+            bid_price=None,
+            creative_id=None,
+            experiment_group=group,
+            score=score,
+            reason=reason,
+        ),
+        category=category,
+        campaign_id=None,
     )
