@@ -6,3 +6,5 @@ pytest
 httpx
 python-dotenv
 redis
+sqlalchemy
+psycopg[binary]

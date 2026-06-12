@@ -1,9 +1,14 @@
 import hashlib
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from app.ai_classifier import classify_context
+from app.campaign_store import get_campaign_store
 from app.config import Settings
 from app.models import BidRequest, BidResponse
+
+
+if TYPE_CHECKING:
+    from app.campaign_store import CampaignStore
 
 
 CREATIVES_BY_CATEGORY: dict[str, str] = {
@@ -93,6 +98,7 @@ def make_bid_decision(
     request: BidRequest,
     features: dict[str, Any],
     settings: Settings,
+    campaign_store: "CampaignStore | None" = None,
 ) -> BidResponse:
     group = assign_experiment_group(request.user_id)
 
@@ -114,6 +120,24 @@ def make_bid_decision(
     should_bid = score >= threshold and calculated_bid_price >= request.floor_price
 
     if should_bid:
+        store = campaign_store or get_campaign_store()
+        campaign = store.get_eligible_campaign(
+            request=request,
+            category=category,
+            bid_price=calculated_bid_price,
+        )
+        if campaign is None:
+            return BidResponse(
+                impression_id=request.impression_id,
+                decision="NO_BID",
+                bid_price=None,
+                creative_id=None,
+                experiment_group=group,
+                score=score,
+                reason="No eligible campaign found",
+            )
+
+        final_bid_price = min(calculated_bid_price, float(campaign["max_bid"]))
         reason = "High predicted value and bid price is above floor price"
         if features.get("is_default"):
             reason += "; default user features were used"
@@ -121,8 +145,8 @@ def make_bid_decision(
         return BidResponse(
             impression_id=request.impression_id,
             decision="BID",
-            bid_price=calculated_bid_price,
-            creative_id=select_creative(category),
+            bid_price=final_bid_price,
+            creative_id=str(campaign["creative_id"]),
             experiment_group=group,
             score=score,
             reason=reason,

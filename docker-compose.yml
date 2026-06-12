@@ -4,6 +4,15 @@ services:
     ports:
       - "6379:6379"
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bid_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+
   app:
     build: .
     ports:
@@ -11,5 +20,8 @@ services:
     environment:
       FEATURE_STORE_TYPE: "redis"
       REDIS_URL: "redis://redis:6379/0"
+      CAMPAIGN_STORE_TYPE: "postgres"
+      DATABASE_URL: "postgresql+psycopg://postgres:postgres@postgres:5432/bid_service"
     depends_on:
       - redis
+      - postgres
