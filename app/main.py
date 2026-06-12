@@ -3,6 +3,7 @@ import time
 
 from fastapi import FastAPI
 
+from app.campaign_store import get_campaign_store
 from app.config import get_settings
 from app.feature_store import get_user_features
 from app.models import BidRequest, BidResponse
@@ -73,6 +74,7 @@ def create_bid_decision(request: BidRequest) -> BidResponse:
         request=request,
         features=features,
         settings=settings,
+        campaign_store=get_campaign_store(),
     )
 
     latency_ms = (time.perf_counter() - start_time) * 1000

@@ -10,6 +10,8 @@ The service simulates a simplified AdTech bidding flow: it validates an incoming
 - FastAPI
 - Pydantic
 - Redis
+- PostgreSQL
+- SQLAlchemy
 - pytest
 - Docker
 
@@ -29,6 +31,8 @@ app/
   models.py            # Pydantic request and response models
   config.py            # Configurable business parameters
   feature_store.py     # Memory and Redis feature-store backends
+  campaign_store.py    # Memory and PostgreSQL campaign stores
+  database.py          # SQLAlchemy engine and session setup
   scoring.py           # Scoring, A/B testing, bid decision logic
   ai_classifier.py     # Local context classification fallback
 
@@ -40,6 +44,8 @@ tests/
 scripts/
   load_test.py
   seed_redis.py
+  init_db.py
+  seed_postgres.py
 
 Dockerfile
 docker-compose.yml
@@ -97,3 +103,50 @@ curl -X POST "http://127.0.0.1:8000/bid" \
 If Redis is unavailable, times out, contains invalid JSON, or does not contain
 the requested user, the service returns `DEFAULT_USER_FEATURES` with
 `is_default=True`. Bid requests continue normally instead of crashing.
+
+## PostgreSQL Campaign Store
+
+Redis stores low-latency user features. PostgreSQL stores campaign targeting,
+budget, maximum bid, and creative configuration. Memory campaign mode remains
+the default for local development and tests:
+
+```bash
+CAMPAIGN_STORE_TYPE=memory
+```
+
+Docker Compose runs the app with both Redis and PostgreSQL enabled:
+
+```bash
+docker compose up --build
+```
+
+Initialize and seed PostgreSQL, then seed Redis:
+
+```bash
+docker compose exec app python scripts/init_db.py
+docker compose exec app python scripts/seed_postgres.py
+docker compose exec app python scripts/seed_redis.py
+```
+
+Check the service and submit a bid request:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST "http://127.0.0.1:8000/bid" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "impression_id": "imp_postgres_1",
+    "user_id": "user_sports_1",
+    "placement": "mobile_feed",
+    "country": "IL",
+    "device": "mobile",
+    "floor_price": 1.2,
+    "context": "sports shoes sale"
+  }'
+```
+
+Before returning `BID`, the service requires an active campaign matching the
+country, device, placement, and category with remaining daily budget. The
+campaign creative is returned and the bid is capped at `max_bid`. If no
+eligible campaign exists, or PostgreSQL cannot be queried in Postgres mode,
+the service returns `NO_BID` with reason `No eligible campaign found`.

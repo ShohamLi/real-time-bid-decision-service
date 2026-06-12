@@ -1,4 +1,5 @@
 from app.config import Settings
+from app.campaign_store import MemoryCampaignStore
 from app.feature_store import get_user_features
 from app.models import BidRequest
 from app.scoring import (
@@ -96,3 +97,50 @@ def test_unknown_user_can_still_get_decision():
 
     assert response.decision in {"BID", "NO_BID"}
     assert "default user features were used" in response.reason
+
+
+def test_no_eligible_campaign_returns_no_bid():
+    settings = Settings()
+    request = make_request()
+    features = get_user_features(request.user_id)
+
+    response = make_bid_decision(
+        request=request,
+        features=features,
+        settings=settings,
+        campaign_store=MemoryCampaignStore([]),
+    )
+
+    assert response.decision == "NO_BID"
+    assert response.bid_price is None
+    assert response.creative_id is None
+    assert response.reason == "No eligible campaign found"
+
+
+def test_campaign_creative_and_max_bid_are_used():
+    settings = Settings()
+    request = make_request()
+    features = get_user_features(request.user_id)
+    campaign = {
+        "campaign_id": "campaign_capped",
+        "status": "active",
+        "category": "sports",
+        "target_country": "IL",
+        "target_device": "mobile",
+        "target_placement": "mobile_feed",
+        "daily_budget": 100.0,
+        "spent_today": 0.0,
+        "max_bid": 1.5,
+        "creative_id": "creative_campaign_123",
+    }
+
+    response = make_bid_decision(
+        request=request,
+        features=features,
+        settings=settings,
+        campaign_store=MemoryCampaignStore([campaign]),
+    )
+
+    assert response.decision == "BID"
+    assert response.bid_price == 1.5
+    assert response.creative_id == "creative_campaign_123"
